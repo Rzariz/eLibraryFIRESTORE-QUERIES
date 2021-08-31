@@ -1,8 +1,12 @@
 import React, { Component } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ImageBackground, Image } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ImageBackground, Image, Alert, KeyboardAvoidingView, ToastAndroid } from "react-native";
 
 import * as Permissions from "expo-permissions";
 import { BarCodeScanner } from "expo-barcode-scanner";
+
+import firebase from 'firebase';
+import db from '../config'
+
 
 const bgImage = require("../assets/background2.png");
 const appIcon = require("../assets/appIcon.png");
@@ -18,6 +22,8 @@ export default class TransactionScreen extends Component {
       scannedData: "",
       bookId: "",
       studentId: "",
+      bookName: "",
+      studentName: ""
     }
   }
 
@@ -56,8 +62,121 @@ export default class TransactionScreen extends Component {
     // });
   };
 
+  handleTransaction = async () => {
+    var { bookId, studentId } = this.state;
+    await this.getBookDetails(bookId);
+    await this.getStudentDetails(studentId);
+
+    db.collection("books")
+      .doc(bookId)
+      .get()
+      .then(doc => {
+        var book = doc.data();
+        if (book.bookAvailability) {
+          var { bookName, studentName } = this.state;
+          this.initiateBookIssue(bookId, studentId, bookName, studentName);
+          //ToastAndroid.show("Book is issued !!" , ToastAndroid.SHORT);
+          alert("Book is issued !!")
+        } else {
+          var { bookName, studentName } = this.state;
+          this.initiateBookReturn(bookId, studentId, bookName, studentName);
+          //ToastAndroid.show("Book is Returned !!" , ToastAndroid.SHORT)
+           alert("Book is returned !!")
+        }
+      });
+  };
+
+  getBookDetails = bookId => {
+    bookId = bookId.trim();
+    db.collection("books")
+      .where("book_id", "==", bookId)
+      .get()
+      .then(snapshot => {
+        snapshot.docs.map(doc => {
+          this.setState({
+            bookName: doc.data().book_details.book_name
+          });
+        });
+      });
+  };
+
+  getStudentDetails = studentId => {
+    studentId = studentId.trim();
+    db.collection("students")
+      .where("student_id", "==", studentId)
+      .get()
+      .then(snapshot => {
+        snapshot.docs.map(doc => {
+          this.setState({
+            studentName: doc.data().student_details.student_name
+          });
+        });
+      });
+  };
+
+  initiateBookIssue = async (bookId, studentId, bookName, studentName) => {
+    //add a transaction
+    db.collection("transaction").add({
+      student_id: studentId,
+      student_name: studentName,
+      book_id: bookId,
+      book_name: bookName,
+      date: firebase.firestore.Timestamp.now().toDate(),
+      transaction_type: "issue"
+    });
+    //change book status
+    db.collection("books")
+      .doc(bookId)
+      .update({
+        bookAvailability: false
+      });
+    //change number  of issued books for student
+    db.collection("students")
+      .doc(studentId)
+      .update({
+        noOfbooks: firebase.firestore.FieldValue.increment(1)
+      });
+
+    // Updating local state
+    this.setState({
+      bookId: "",
+      studentId: ""
+    });
+  };
+
+  initiateBookReturn = async (bookId, studentId, bookName, studentName) => {
+    //add a transaction
+    db.collection("transaction").add({
+      student_id: studentId,
+      student_name: studentName,
+      book_id: bookId,
+      book_name: bookName,
+      date: firebase.firestore.Timestamp.now().toDate(),
+      transaction_type: "return"
+    });
+    //change book status
+    db.collection("books")
+      .doc(bookId)
+      .update({
+        bookAvailability: true
+      });
+    //change number  of issued books for student
+    db.collection("students")
+      .doc(studentId)
+      .update({
+        noOfbooks: firebase.firestore.FieldValue.increment(-1)
+      });
+
+    // Updating local state
+    this.setState({
+      bookId: "",
+      studentId: ""
+    });
+  };
+
   render() {
     const { domState, bookId, studentId, scanned } = this.state;
+
     if (domState !== "normal") {
       return (
         <BarCodeScanner
@@ -66,49 +185,60 @@ export default class TransactionScreen extends Component {
         />
       );
     }
-    return (
-      <View style={styles.container}>
+      return (
+        <KeyboardAvoidingView style={styles.container} behavior = "padding" enabled>
+        {/* <View style={styles.container}> */}
 
-        <ImageBackground source={bgImage} style={styles.bgImage}>
-          <View style={styles.upperContainer}>
-            <Image source={appIcon} style={styles.appIcon} />
-            <Image source={appName} style={styles.appName} />
-          </View>
-
-
-          <View style={styles.lowerContainer}>
-
-
-            <View style={styles.textinputContainer}>
-              <TextInput
-                style={styles.textinput}
-                placeholder={"Book Id"}
-                placeholderTextColor={"#FFFFFF"}
-                value={bookId} />
-              <TouchableOpacity
-                style={styles.scanbutton}
-                onPress={() => this.getCameraPermissions("bookId")} >
-                <Text style={styles.scanbuttonText}>Scan</Text>
-              </TouchableOpacity>
+          <ImageBackground source={bgImage} style={styles.bgImage}>
+            <View style={styles.upperContainer}>
+              <Image source={appIcon} style={styles.appIcon} />
+              <Image source={appName} style={styles.appName} />
             </View>
 
-            <View style={[styles.textinputContainer, { marginTop: 25 }]}>
-              <TextInput
-                style={styles.textinput}
-                placeholder={"Student Id"}
-                placeholderTextColor={"#FFFFFF"}
-                value={studentId}
-              />
+
+            <View style={styles.lowerContainer}>
+
+
+              <View style={styles.textinputContainer}>
+                <TextInput
+                  style={styles.textinput}
+                  placeholder={"Book Id"}
+                  placeholderTextColor={"#FFFFFF"}
+                  value={bookId}
+                  onChangeText={text => this.setState({ bookId: text })}
+                  />
+                <TouchableOpacity
+                  style={styles.scanbutton}
+                  onPress={() => this.getCameraPermissions("bookId")} >
+                  <Text style={styles.scanbuttonText}>Scan</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={[styles.textinputContainer, { marginTop: 25 }]}>
+                <TextInput
+                  style={styles.textinput}
+                  placeholder={"Student Id"}
+                  placeholderTextColor={"#FFFFFF"}
+                  value={studentId}
+                  onChangeText={text => this.setState({ studentId: text })}
+                />
+                <TouchableOpacity
+                  style={styles.scanbutton}
+                  onPress={() => this.getCameraPermissions("studentId")}
+                >
+                  <Text style={styles.scanbuttonText}>Scan</Text>
+                </TouchableOpacity>
+              </View>
+
               <TouchableOpacity
-                style={styles.scanbutton}
-                onPress={() => this.getCameraPermissions("studentId")}
+                style={[styles.button, { marginTop: 25 }]}
+                onPress={() => this.handleTransaction()}
               >
-                <Text style={styles.scanbuttonText}>Scan</Text>
+                <Text style={styles.buttonText}>Submit</Text>
               </TouchableOpacity>
-            </View>
 
-          </View>
-          {/* <Text style={styles.text}>
+            </View>
+            {/* <Text style={styles.text}>
           {hasCameraPermissions ? scannedData : "Request for Camera Permission"}
         </Text>
         <TouchableOpacity
@@ -116,9 +246,9 @@ export default class TransactionScreen extends Component {
           onPress={() => this.getCameraPermissions("scanner")}>
           <Text style={styles.buttonText}>Scan QR Code</Text>
         </TouchableOpacity> */}
-        </ImageBackground>
-      </View>
-    );
+          </ImageBackground>
+        </KeyboardAvoidingView>
+      );
   }
 }
 
@@ -203,5 +333,17 @@ const styles = StyleSheet.create({
     height: 80,
     resizeMode: "contain"
   },
-
+  button: {
+    width: "43%",
+    height: 55,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#F48D20",
+    borderRadius: 15
+  },
+  buttonText: {
+    fontSize: 24,
+    color: "#FFFFFF",
+    fontFamily: "Rajdhani_600SemiBold"
+  }
 });
